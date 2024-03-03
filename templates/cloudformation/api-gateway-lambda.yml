@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Morse Lambda Microservices Deployment
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Connect Information name
+  Stage:
+    Type: String
+    Description: Connect Information name
+    Default: Prod
+Resources:
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${ProjectName}-user-pool
+      UsernameAttributes:
+        - email
+      UsernameConfiguration:
+        CaseSensitive: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          TemporaryPasswordValidityDays: 7
+      MfaConfiguration: "OFF"
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AutoVerifiedAttributes:
+        - email
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate: 
+          - email
+      Schema:
+        - AttributeDataType: "String"
+          Mutable: true
+          Name: email
+          Required: true
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties: 
+      Domain: !Sub morsecode-test-domain
+      UserPoolId: !Ref CognitoUserPool
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      ClientName: !Sub ${ProjectName}-app-user-pool-client
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH 
+        - ALLOW_CUSTOM_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+      AuthSessionValidity: 3
+      RefreshTokenValidity: 30
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      TokenValidityUnits:
+        AccessToken: minutes
+        RefreshToken: days
+        IdToken: minutes
+      EnableTokenRevocation: true
+      PreventUserExistenceErrors: ENABLED
+      CallbackURLs:
+        - "http://localhost:3000/"
+      LogoutURLs:
+        - "http://localhost:3000/"
+      SupportedIdentityProviders:
+        - "COGNITO"
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - implicit
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - phone
+
+  CognitoAPIGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub "stream-apigateway-${Stage}"
+      StageName: !Ref Stage
+      OpenApiVersion: '2.0'
+      Description: API supporting the application
+      TracingEnabled: true
+      Cors:
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowMethods: "'OPTIONS,DELETE,GET,HEAD,POST,PUT'"
+        AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: MyCognitoTestAuth 
+        Authorizers:
+          MyCognitoTestAuth:
+            UserPoolArn: !GetAtt CognitoUserPool.Arn
+
+  HelloWorldFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: ../../bin/hello-world.zip
+      FunctionName: !Sub "${ProjectName}-hello-world"
+      Handler: bootstrap
+      Runtime: provided.al2
+      Events:
+        HelloWorld:
+          Type: Api
+          Properties:
+            Path: /
+            Method: get
+            RestApiId: !Ref CognitoAPIGateway
+            Auth:
+              Authorizer: MyCognitoTestAuth
+Outputs:
+  CognitoAPIGateway:
+    Description: "API Gateway endpoint URL para documentos"
+    Value: !Sub "https://${CognitoAPIGateway}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"

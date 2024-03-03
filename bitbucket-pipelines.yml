@@ -1,0 +1,53 @@
+definitions:
+  caches:
+    sam: sam-installation
+pipelines:
+  branches:
+    dev:
+      - step:
+          name: Build Go Lambda Functions
+          image: golang:latest
+          script:
+            # Update package lists and install necessary tools
+            - apt-get update -y
+            - apt-get install -y zip make build-essential
+            - mkdir -p bin
+
+            # Configure Git to use SSH and bypass the Go proxy for private modules
+            - git config --global url."git@bitbucket.org:".insteadOf "https://bitbucket.org/"
+            - go env -w GOPRIVATE=bitbucket.org/itsmorse/*
+
+            # Compile the code
+            - chmod +x -R scripts/
+            - make build
+          artifacts:
+            - bin/*.zip
+      - step:
+          name: Deploy to Dev
+          oidc: true
+          image: amazon/aws-cli
+          deployment: Test
+          caches:
+            - sam
+          script:
+            # Assume role and request temporary credentials
+            - export AWS_WEB_IDENTITY_TOKEN_FILE=$(pwd)/web-identity-token
+            - echo $BITBUCKET_STEP_OIDC_TOKEN > $(pwd)/web-identity-token
+
+            # Install SAM CLI if not present
+            - if [[ ! -f "sam-installation/dist/sam" ]]; then
+                echo "SAM CLI not found. Installing...";
+                yum install -y unzip;
+                curl -Lo aws-sam-cli-linux-x86_64.zip https://github.com/aws/aws-sam-cli/releases/latest/download/aws-sam-cli-linux-x86_64.zip;
+                unzip -q -o aws-sam-cli-linux-x86_64.zip -d sam-installation;
+                ./sam-installation/install;
+              fi
+            - export PATH=$PATH:$(pwd)/sam-installation/dist/
+            - sam --version
+
+            # Package and deploy with SAM
+            - STACK_NAME=$(echo $BITBUCKET_REPO_FULL_NAME | tr '/' '-')
+            - STACK_NAME=$(echo $STACK_NAME-test-google)
+            - sam build --template-file templates/cloudformation/cognito-google.yml
+            - sam package --output-template-file packaged.yaml --s3-bucket $S3_CLOUDFORMATION_BUCKET --s3-prefix $STACK_NAME
+            - sam deploy --template-file packaged.yaml --stack-name $STACK_NAME --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset --parameter-overrides ProjectName=$ProjectName

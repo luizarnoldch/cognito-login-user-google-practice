@@ -1,0 +1,176 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Morse Lambda Microservices Deployment
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Connect Information name
+Resources:
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${ProjectName}-user-pool
+      # - Users
+
+      # - Groups
+        # -> AWS::Cognito::UserPoolGroup
+
+      # - Sign-in experience
+        # -- Cognito user pool sign-in
+      UsernameAttributes:
+        - email
+      UsernameConfiguration:
+        CaseSensitive: true
+        # -- Federated identity provider sign in
+        # -> AWS::Cognito::UserPoolIdentityProvider
+
+        # -- Pasword policy
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          TemporaryPasswordValidityDays: 7
+
+        # -- Multi-factor authentication
+      MfaConfiguration: "OFF"
+      # [
+      # MfaConfiguration: "ON"
+      # EnabledMfas:
+      #   - SMS_MFA
+      #   - SOFTWARE_TOKEN_MFA
+      # ]
+
+        # -- User account recovery
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      # - Sign-up experience
+        # -- Attributes verification and user account confirmation
+      # [
+      # EmailConfiguration:
+      #     EmailSendingAccount: COGNITO_DEFAULT
+      # ]
+
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AutoVerifiedAttributes:
+        - email
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate: 
+          - email
+        # -- Required attributes
+      Schema:
+        - AttributeDataType: "String"
+          Mutable: true
+          Name: email
+          Required: true
+        # -- Custom attributes
+        # -- self service sing-up
+      # - Messaging
+      # SmsConfiguration:
+      #   SnsCallerArn: !GetAtt CognitoSmsRole.Arn
+      #   ExternalId: "cognito_sms_role_external_id"
+
+
+      # - App integration
+        # -> AWS::Cognito::UserPoolDomain
+        # -> AWS::Cognito::UserPoolClient
+      # - User pool properties
+        # -- Lambda Triggers
+      # LambdaConfig:
+      #   PreSignUp: !If [HasPreSignUpLambda, !Ref CognitoPreSignUpLambda, !Ref "AWS::NoValue"]
+      #   PreTokenGeneration: !If [HasPreTokenGenerationLambda, !Ref CognitoPreTokenGenerationLambda, !Ref "AWS::NoValue"]
+      #   PostConfirmation: !If [HasPostSignUpLambda, !Ref CognitoPostSignUpLambda, !Ref "AWS::NoValue"]
+
+        # -- AWS WAF
+      
+        # -- Deletion protection
+
+        # -- Tags
+  
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties: 
+      Domain: !Sub morsecode-test-domain
+      UserPoolId: !Ref CognitoUserPool
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      ClientName: !Sub ${ProjectName}-app-user-pool-client
+      # - App Client Information
+        # -- Client Secret
+      GenerateSecret: false
+
+        # -- Authentication flows
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH 
+        - ALLOW_CUSTOM_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+
+        # -- Authetication flow session duration
+      AuthSessionValidity: 3
+        # -- Refresh token expiration
+      RefreshTokenValidity: 30
+        # -- Access token expiration
+      AccessTokenValidity: 60
+        # -- ID token expiration
+      IdTokenValidity: 60
+
+      TokenValidityUnits:
+        AccessToken: minutes
+        RefreshToken: days
+        IdToken: minutes
+      
+        # -- Advanced authentication settings
+      EnableTokenRevocation: true
+      PreventUserExistenceErrors: ENABLED
+      # - Attribute read and write permissions
+      # - Pinpoint analytics
+      # - Hosted UI
+        # -- Allowed callback URLs
+      CallbackURLs:
+        - "http://localhost/"
+        - "http://localhost:8080/"
+        # - !Ref CallbackURL
+        
+        # -- Allowed sign-out URLs
+      LogoutURLs:
+        - "http://localhost/"
+        - "http://localhost:8080/"
+        # - !Ref SignOutURL
+
+        # -- Identity providers
+      SupportedIdentityProviders:
+        - "COGNITO"
+        # [
+        # - !If [HasGoogleInfo, "Google", !Ref "AWS::NoValue"]
+        # - !If [HasMicrosoftInfo, "Microsoft", !Ref "AWS::NoValue"]
+        # ]
+
+        # -- OAuth grant types
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - implicit
+        # [
+        # - code
+        # ]
+
+        # -- OpenID Connect scopes
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - phone
+        # [
+        # - profile
+        # - aws.cognito.signin.user.admin
+        # ]
+
+        # -- Custom scopes
